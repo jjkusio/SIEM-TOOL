@@ -24,7 +24,18 @@ event_types = [
     ("check pass",                    "check_pass"),
     ("accepted publickey",            "accepted_publickey"),
     ("connection reset by",           "connection_reset"),
-    ("unable to negotiate",           "unable_to_negotiate"),        
+    ("unable to negotiate",           "unable_to_negotiate"),
+    ("new group",                     "new_group"),
+    ("group added",                   "new_group"),
+    ("removed shadow group",          "removed_user_group"),
+    ("removed group",                 "del_group"),
+    ("group '",                       "del_group"),
+    ("password changed",              "password_changed"),
+    ("new user",                      "new_user"),
+    ("delete user",                   "del_user"),
+    ("failed adding user",            "user_add_failed"),
+    ("xcouldn't update the login keyring password", "update_login_failed")
+
     ]
 
 ssh_client = paramiko.SSHClient()
@@ -60,8 +71,12 @@ def base_parser(line):
 def parser_auth(line):
     if ("pam_unix" in line.lower() and "su:auth" in line.lower()) or "authentication failure" in line.lower():
         username = re.search(r"(?<=user=)\w+", line)
+    elif "password changed" in line.lower():
+        username = re.search(r"(?<=for )\w+", line)
     elif "pam_unix" in line.lower() or "invalid user" in line.lower() or "preauth" in line.lower() or "systemd-logind" in line.lower():
         username = re.search(r"(?<=user )\w+", line)
+    elif "delete user" in line.lower() or "failed adding user" in line.lower():
+        username = re.search(r"(?<=user ')\w+", line)
     elif "FAILED SU" in line:
         username = re.search(r"(?<=[)] )\w+", line)
     elif "usermod" in line:
@@ -70,14 +85,23 @@ def parser_auth(line):
         username=re.search(r"sudo:\s+(\w+)", line)
     elif "disconnected from user" in line.lower():
         username = re.search(r"(?<=from user )\w+", line)
+    elif "removed group" in line.lower():
+        username = re.search(r"(?<=owned by ')\w+", line)
+    elif "new user" in line.lower():
+        username=re.search(r"(?<=name=)\w+", line)
     else:
         username = re.search(r"(?<=for )\w+", line)
+    if ("name=" in line.lower() and "new group" in line.lower()) or "group added to" in line.lower():
+        group = re.search(r"(?<=name=)\w+", line)
+    else:
+        group = re.search(r"(?<=group ')\w+", line)
     ip = re.search(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", line)
     port = re.search(r"(?<=port )\w+", line)
     dic ={
         "Source ip": ip.group() if ip else None,
         "Username": username.group() if username else None,
         "Port": port.group() if port else None,
+        "Group": group.group() if group else None,
         "Event type": None
     }
     if "COMMAND=" in line:
