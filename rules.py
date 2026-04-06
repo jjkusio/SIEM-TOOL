@@ -38,7 +38,18 @@ def login_root(event):
             "Description": f"Login as root from: {ip}"
             }
     
-    
+def not_in_sudoers(event):
+    if event["Event type"] != "user_not_in_sudoers":
+        return None
+    now = event["Timestamp"]
+    user = event["Username"]
+    return {
+            "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "SEVERITY": "HIGH",
+            "TYPE": "User not in sudoers",
+            "MITRE ATT&CK": "T1548.003",
+            "Description": f"{user} not in sudoers"
+            }
 
         
 

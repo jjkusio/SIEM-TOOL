@@ -1,7 +1,7 @@
 import paramiko
 import re 
 from datetime import datetime
-
+from rules import brute_force, login_root, not_in_sudoers
 
 ssh_client = paramiko.SSHClient()
 
@@ -22,6 +22,8 @@ def base_parser(line):
         proc_name = re.search(r"(?<= \()[\w-]+", line)
     else:
         proc_name = re.search(r"[\w-]+(?=\[)", line)
+    if proc_name == None:
+        proc_name = re.search(r"\w+(?=:)", parts[2])
     pid = re.search(r"(?<=\[)\w+", line)
     port = re.search(r"(?<=port )\w+", line)
     dic ={
@@ -247,9 +249,11 @@ processes = {
     "useradd": useradd_parser,
     "userdel": userdel_parser,
     "passwd": passwd_parser,
+    "sudo": sudo_parser,
     "su": sudo_parser,
-    "sudo": sudo_parser
 }
+alerts = [brute_force, login_root, not_in_sudoers]
+
 for line in stdout:
     base = base_parser(line)
     if base["Process name"] is None:
@@ -257,9 +261,12 @@ for line in stdout:
     elif base['Process name'] in processes:
         not_base = processes[base["Process name"]](line)
         final = base | not_base
-        print(final)
-        print(line)
-    
+        for rule in alerts:
+            result = rule(final)
+            if result:
+                print("Warning!")
+                print(result)
+           
          
 
             
