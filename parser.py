@@ -1,42 +1,7 @@
 import paramiko
 import re 
 from datetime import datetime
-event_types = [
-    ("failed password",               "failed_password"),
-    ("accepted password",             "accepted_password"),
-    ("new session",                   "new_session"),
-    ("session opened",                "session_opened"),
-    ("logged out",                    "session_logout"),
-    ("session closed",                "session_closed"),
-    ("removed session",               "session_removed"),
-    ("authentication failure",        "authentication_failure"),
-    ("failed su",                     "failed_sudo"),
-    ("connection closed by invalid",  "invalid_user"),
-    ("connection closed by",          "connection_closed_preauth"),
-    ("password information for root", "passwd_root"),
-    ("add '",                         "group_add"),
-    ("delete '",                      "group_delete"),
-    ("not in sudoers",                "user_not_in_sudoers"),
-    ("command=",                      "sudo_command"),
-    ("received disconnect",           "received_disconnect"),
-    ("disconnected from user",        "user_disconnected"),
-    ("invalid user",                  "invalid_user_attempt"),
-    ("check pass",                    "check_pass"),
-    ("accepted publickey",            "accepted_publickey"),
-    ("connection reset by",           "connection_reset"),
-    ("unable to negotiate",           "unable_to_negotiate"),
-    ("new group",                     "new_group"),
-    ("group added",                   "new_group"),
-    ("removed shadow group",          "removed_user_group"),
-    ("removed group",                 "del_group"),
-    ("group '",                       "del_group"),
-    ("password changed",              "password_changed"),
-    ("new user",                      "new_user"),
-    ("delete user",                   "del_user"),
-    ("failed adding user",            "user_add_failed"),
-    ("xcouldn't update the login keyring password", "update_login_failed")
 
-    ]
 
 ssh_client = paramiko.SSHClient()
 
@@ -46,8 +11,6 @@ passw = input ("Enter password: ")
 ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 ssh_client.connect(hostname=hname, port=22, username=uname, password=passw)
 stdin, stdout, stderr = ssh_client.exec_command("tail -f /var/log/auth.log")
-
-
 def base_parser(line):
     time = re.search(r"\d{1,2}:\d{1,2}:\d{1,2}", line)
     date = re.search(r"\d{1,4}-\d{1,2}-\d{1,2}", line)
@@ -60,67 +23,244 @@ def base_parser(line):
     else:
         proc_name = re.search(r"[\w-]+(?=\[)", line)
     pid = re.search(r"(?<=\[)\w+", line)
+    port = re.search(r"(?<=port )\w+", line)
     dic ={
         "Timestamp": timestamp,
         "Hostname": hostname,
         "Process name": proc_name.group() if proc_name is not None else None,
+        "Port": port.group() if port else None,
         "PID": pid.group() if pid is not None else None
     }
     return dic
 
-def parser_auth(line):
-    if ("pam_unix" in line.lower() and "su:auth" in line.lower()) or "authentication failure" in line.lower():
+
+def base_dic():
+    return {
+        "Username": None,
+        "IP": None,
+        "Event type": None,
+        "Group": None
+    }
+
+def sshd_parser(line):
+    linel = line.lower()
+    events = [
+    ("failed password",               "failed_password"),
+    ("accepted password",             "accepted_password"),
+    ("connection closed by invalid",  "invalid_user"),
+    ("connection closed by",          "connection_closed_preauth"),
+    ("received disconnect",           "received_disconnect"),
+    ("disconnected from user",        "user_disconnected"),
+    ("invalid user",                  "invalid_user_attempt"),
+    ("check pass",                    "check_pass"),
+    ("accepted publickey",            "accepted_publickey"),
+    ("connection reset by",           "connection_reset"),
+    ("unable to negotiate",           "unable_to_negotiate"),
+    ("session opened",                "session_opened"),  
+    ("session closed",                "session_closed"),
+    ("authentication failure",        "authentication_failure"),
+    ("ignoring max retries",          "max_retries_ignore"),
+    ("exited maxstartups",            "maxstartups_exit"),
+    ("beginning maxstartups",         "maxstartups_throttle_start"),
+    ]
+    if "invalid user" in linel:
+        username = re.search(r"(?<=invalid user )\w+", linel)
+    elif "authentication failure" in linel:
         username = re.search(r"(?<=user=)\w+", line)
-    elif "password changed" in line.lower():
-        username = re.search(r"(?<=for )\w+", line)
-    elif "pam_unix" in line.lower() or "invalid user" in line.lower() or "preauth" in line.lower() or "systemd-logind" in line.lower():
+    elif "session opened" in linel or "session closed" in linel or "disconnected from" in linel or "check pass" in linel:
         username = re.search(r"(?<=user )\w+", line)
-    elif "delete user" in line.lower() or "failed adding user" in line.lower():
-        username = re.search(r"(?<=user ')\w+", line)
-    elif "FAILED SU" in line:
-        username = re.search(r"(?<=[)] )\w+", line)
-    elif "usermod" in line:
-        username = re.search(r"(?<=')\w+", line)
-    elif "COMMAND=" in line:
-        username=re.search(r"sudo:\s+(\w+)", line)
-    elif "disconnected from user" in line.lower():
-        username = re.search(r"(?<=from user )\w+", line)
-    elif "removed group" in line.lower():
-        username = re.search(r"(?<=owned by ')\w+", line)
-    elif "new user" in line.lower():
-        username=re.search(r"(?<=name=)\w+", line)
     else:
         username = re.search(r"(?<=for )\w+", line)
+    ip = re.search(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", line)
+    event_type = None
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    dic = base_dic()
+    dic["Username"] = username.group() if username else None
+    dic["IP"] = ip.group() if ip else None
+    dic["Event type"] = event_type
+    return dic
+
+def sudo_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events=[
+        ("failed su",                     "failed_sudo"),
+        ("not in sudoers",                "user_not_in_sudoers"),
+        ("command=",                      "sudo_command"),
+        ("session opened",                "session_opened"),
+        ("session closed",                "session_closed"),
+        ("authentication failure",        "authentication_failure"),
+    ]
+    username = None
+    if "failed su" in linel:
+        username = re.search(r"(?<=\) )\w+", line)
+    elif "session opened" in linel or "session closed" in linel:
+        username = re.search(r"(?<=by )\w+", line)
+    elif "authentication failure" in linel:
+        username = re.search(r"(?<=user=)\w+", line)
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    dic["Event type"] = event_type
+    dic["Username"] = username.group() if username else None
+    if "COMMAND=" in line or "not in sudoers" in linel:
+        match = re.search(r"sudo:\s+(\w+)", line)
+        dic["Username"] = match.group(1) if match is not None else None
+    return dic
+
+def passwd_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events =[
+         ("couldn't update the login keyring password", "update_login_failed"),
+         ("password changed",              "password_changed"),
+         ("can't view or modify",          "cant_view_or_modify_passwd")
+    ]
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    username = None
+    username = re.search(r"(?<=for )\w+", line)
+    dic['Username'] = username.group() if username else None
+    dic["Event type"] = event_type
+    return dic
+
+def useradd_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events =[
+         ("new group",                     "new_group"),
+         ("new user",                      "new_user"),
+         ("failed adding user",            "user_add_failed"),
+    ]
     if ("name=" in line.lower() and "new group" in line.lower()) or "group added to" in line.lower():
         group = re.search(r"(?<=name=)\w+", line)
     else:
         group = re.search(r"(?<=group ')\w+", line)
-    ip = re.search(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", line)
-    port = re.search(r"(?<=port )\w+", line)
-    dic ={
-        "Source ip": ip.group() if ip else None,
-        "Username": username.group() if username else None,
-        "Port": port.group() if port else None,
-        "Group": group.group() if group else None,
-        "Event type": None
-    }
-    if "COMMAND=" in line:
-        match = re.search(r"sudo:\s+(\w+)", line)
-        dic["Username"] = match.group(1) if match is not None else None
-    for phrase, event in event_types:
-        if phrase in line.lower():
-            dic["Event type"] = event
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
             break
+    if "failed adding user" in linel:
+        username = re.search(r"(?<=user ')\w+", line)
+    else:
+        username = re.search(r"(?<=name=)\w+", line)
+    dic['Username'] = username.group() if username else None
+    dic["Event type"] = event_type
+    dic["Group"] = group.group() if group else None
     return dic
 
-events= []
-for line in stdout:
-    a = base_parser(line)
-    b = parser_auth(line)
-    c = a | b
-    events.append(c)
-    print(c)
-    print(line)
+def userdel_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events = [
+    ("removed shadow group",          "removed_user_group"),
+    ("removed group",                 "del_group"),
+    ("delete user",                   "del_user"),
+    ]
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    if ("name=" in line.lower() and "new group" in line.lower()) or "group added to" in line.lower():
+        group = re.search(r"(?<=name=)\w+", line)
+    else:
+        group = re.search(r"(?<=group ')\w+", line)
+    if "delete user" in linel:
+        username = re.search(r"(?<=user ')\w+", line)
+    else:
+        username=re.search(r"(?<=by ')\w+",line)
+    dic['Username'] = username.group() if username else None
+    dic["Event type"] = event_type
+    dic["Group"] = group.group() if group else None
+    return dic
 
-  
+def groupadd_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events = [
+    ("new group",                     "new_group"),
+    ("group added",                   "new_group"),
+    ]
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    if ("name=" in line.lower() and "new group" in line.lower()) or "group added to" in line.lower():
+        group = re.search(r"(?<=name=)\w+", line)
+    else:
+        group = re.search(r"(?<=group ')\w+", line)
+    dic["Event type"] = event_type
+    dic["Group"] = group.group() if group else None
+    return dic
+
+def groupdel_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events = [
+    ("removed group",                 "del_group"),
+    ]
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    group = re.search(r"(?<=group ')\w+", line)
+    dic["Event type"] = event_type
+    dic["Group"] = group.group() if group else None
+    return dic
+
+def systemd_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events = [
+    ("new session",                   "new_session"),
+    ("removed session",               "session_removed"),
+    ("logged out",                    "session_logout")
+    ]
+    username = None
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+    username = re.search(r"(?<=user )\w+", line)
+    dic["Event type"] = event_type
+    dic["Username"] = username.group() if username else None
+    return dic
+
+processes = {
+    "sshd": sshd_parser,
+    "systemd-logind": systemd_parser,
+    "groupadd": groupadd_parser,
+    "groupdel": groupdel_parser,
+    "useradd": useradd_parser,
+    "userdel": userdel_parser,
+    "passwd": passwd_parser,
+    "su": sudo_parser,
+    "sudo": sudo_parser
+}
+for line in stdout:
+    base = base_parser(line)
+    if base["Process name"] is None:
+        continue
+    elif base['Process name'] in processes:
+        not_base = processes[base["Process name"]](line)
+        final = base | not_base
+        print(final)
+        print(line)
+    
+         
+
+            
 
