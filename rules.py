@@ -51,7 +51,18 @@ def not_in_sudoers(event):
             "Description": f"{user} not in sudoers"
             }
 
-        
-
+def invalid_user(event):
+    if event["Event type"] != "invalid_user_attempt":
+        return None
+    ip = event["IP"]
+    user = event["Username"]
+    now = event["Timestamp"]
+    return {
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "HIGH",
+        "TYPE": "User does not exist",
+        "MITRE ATT&CK": "T1087.001",
+        "Description": f"{user} does not exist"
+    }
 
     

@@ -1,16 +1,63 @@
 import paramiko
 import re 
 from datetime import datetime
-from rules import brute_force, login_root, not_in_sudoers
+from rules import brute_force, login_root, not_in_sudoers, invalid_user
+import streamlit as st
+import pandas as pd
+import threading
+import queue
 
-ssh_client = paramiko.SSHClient()
+alerts = [brute_force, login_root, not_in_sudoers, invalid_user]
+df = pd.DataFrame({
+    "TIME": [],
+    "SEVERITY": [],
+    "TYPE": [],
+    "MITRE ATT&CK": [],
+    "Description": []
+    })
+df
+def read_log(stdout, que):
+    for line in iter(stdout.readline, ""):
+        base = base_parser(line)
+        if base["Process name"] is None or base["Process name"] not in processes:
+            continue
+        else:
+            not_base = processes[base["Process name"]](line)
+            final = base | not_base
+            for event in alerts:
+                alert = event(final)
+                if alert:
+                    que.put({"TIME": 12,"SEVERITY": "HIGH","TYPE": "User does not exist","MITRE ATT&CK": "T1087.001","Description": "user does not exist"
+    })
+                    
+with st.sidebar:
+    st.text_input("Enter hostname/IP: ", key="hname")
+    st.text_input("Enter username: ", key="uname")
+    st.text_input("Enter password: ", type="password", key="passw")
+    if st.button("Connect"):
+        try:
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(hostname=st.session_state.hname, port=22, username=st.session_state.uname, password=st.session_state.passw)
+            stdin, stdout, stderr = ssh_client.exec_command("tail -f /var/log/auth.log")
+            st.session_state.Q = queue.Queue()
+            t = threading.Thread(target=read_log, args=(stdout, st.session_state.Q), daemon=True)
+            t.start()
+            st.session_state.connected = True
+        except Exception as s:
+            st.exception(s)
+            st.session_state.connected = False
+        if st.session_state.connected:
+            st.success("Connected!")
+        else:
+            st.error("Unable to connect.")
+            
+st.session_state.Q = queue.Queue()
+abc = st.session_state.Q.get()
+st.write(abc)
 
-hname = input("Enter hostname: ")
-uname = input("Enter username: ")
-passw = input ("Enter password: ")
-ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh_client.connect(hostname=hname, port=22, username=uname, password=passw)
-stdin, stdout, stderr = ssh_client.exec_command("tail -f /var/log/auth.log")
+
+
 def base_parser(line):
     time = re.search(r"\d{1,2}:\d{1,2}:\d{1,2}", line)
     date = re.search(r"\d{1,4}-\d{1,2}-\d{1,2}", line)
@@ -252,21 +299,8 @@ processes = {
     "sudo": sudo_parser,
     "su": sudo_parser,
 }
-alerts = [brute_force, login_root, not_in_sudoers]
 
-for line in stdout:
-    base = base_parser(line)
-    if base["Process name"] is None:
-        continue
-    elif base['Process name'] in processes:
-        not_base = processes[base["Process name"]](line)
-        final = base | not_base
-        for rule in alerts:
-            result = rule(final)
-            if result:
-                print("Warning!")
-                print(result)
-           
+
          
 
             
