@@ -6,59 +6,13 @@ import streamlit as st
 import pandas as pd
 import threading
 import queue
-
-alerts = [brute_force, login_root, not_in_sudoers, invalid_user]
-df = pd.DataFrame({
-    "TIME": [],
-    "SEVERITY": [],
-    "TYPE": [],
-    "MITRE ATT&CK": [],
-    "Description": []
-    })
-df
-def read_log(stdout, que):
-    for line in iter(stdout.readline, ""):
-        base = base_parser(line)
-        if base["Process name"] is None or base["Process name"] not in processes:
-            continue
-        else:
-            not_base = processes[base["Process name"]](line)
-            final = base | not_base
-            for event in alerts:
-                alert = event(final)
-                if alert:
-                    que.put({"TIME": 12,"SEVERITY": "HIGH","TYPE": "User does not exist","MITRE ATT&CK": "T1087.001","Description": "user does not exist"
-    })
-                    
-with st.sidebar:
-    st.text_input("Enter hostname/IP: ", key="hname")
-    st.text_input("Enter username: ", key="uname")
-    st.text_input("Enter password: ", type="password", key="passw")
-    if st.button("Connect"):
-        try:
-            ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh_client.connect(hostname=st.session_state.hname, port=22, username=st.session_state.uname, password=st.session_state.passw)
-            stdin, stdout, stderr = ssh_client.exec_command("tail -f /var/log/auth.log")
-            st.session_state.Q = queue.Queue()
-            t = threading.Thread(target=read_log, args=(stdout, st.session_state.Q), daemon=True)
-            t.start()
-            st.session_state.connected = True
-        except Exception as s:
-            st.exception(s)
-            st.session_state.connected = False
-        if st.session_state.connected:
-            st.success("Connected!")
-        else:
-            st.error("Unable to connect.")
-            
-st.session_state.Q = queue.Queue()
-abc = st.session_state.Q.get()
-st.write(abc)
-
+from streamlit_autorefresh import st_autorefresh
 
 
 def base_parser(line):
+    message = re.search(r"(?<=\):).+\w+", line)
+    if message is None:
+        message = re.search(r"(?<=\]:).+\w+", line)
     time = re.search(r"\d{1,2}:\d{1,2}:\d{1,2}", line)
     date = re.search(r"\d{1,4}-\d{1,2}-\d{1,2}", line)
     times= (date.group() if date is not None else "") + " " + (time.group() if time is not None else "")
@@ -78,7 +32,8 @@ def base_parser(line):
         "Hostname": hostname,
         "Process name": proc_name.group() if proc_name is not None else None,
         "Port": port.group() if port else None,
-        "PID": pid.group() if pid is not None else None
+        "PID": pid.group() if pid is not None else None,
+        "Message": message.group() if message else None
     }
     return dic
 
@@ -300,6 +255,129 @@ processes = {
     "su": sudo_parser,
 }
 
+st.set_page_config(layout="wide")
+alerts = [brute_force, login_root, not_in_sudoers, invalid_user]
+
+if "Q"not in st.session_state:
+    st.session_state.Q = queue.Queue()
+if "Q_alert" not in st.session_state:
+    st.session_state.Q_alert = queue.Queue()
+if "logs_df" not in st.session_state:
+    st.session_state.logs_df = pd.DataFrame(
+        columns=["Timestamp", "Message"]
+    )
+if "alert_list" not in st.session_state:
+    st.session_state.alert_list = []
+
+if "connected" not in st.session_state:
+    st.session_state.connected = False
+
+
+st_autorefresh(interval=3000, key="autorefresh")
+
+
+st.markdown("# :red[SIEM] Tool")
+def read_alerts_que():
+    alert_list = []
+    while True:
+        try:
+                alert = st.session_state.Q_alert.get_nowait()
+                alert_list.append(alert)
+        except queue.Empty:
+            break
+    return alert_list
+
+
+def read_log(stdout, q_logs, q_alerts):
+    for line in iter(stdout.readline, ""):
+        try:
+            base = base_parser(line)
+            if base["Process name"] is None or base["Process name"] not in processes:
+                continue
+            # logi
+            if base["Message"] is not None:
+                q_logs.put(base)
+            # alerty
+            not_base = processes[base["Process name"]](line)
+            final = base | not_base
+            for event in alerts:
+                result = event(final)
+                if result:
+                    q_alerts.put(result)
+        except Exception as e:
+            continue
+
+def read_que():
+    rows = []
+    while True:
+        try:
+            alert = st.session_state.Q.get_nowait()
+            rows.append(alert)
+        except:
+            break
+    return rows
+
+rows = read_que()
+alert_data  = read_alerts_que()
+
+if alert_data:
+    for alert in alert_data:
+        st.session_state.alert_list.append(alert)
+
+
+
+if rows:
+    new_df = pd.DataFrame(rows, columns=["Timestamp", "Message"])
+    st.session_state.logs_df = pd.concat(
+        [st.session_state.logs_df, new_df], ignore_index=True
+    )
+
+col_logs, col_alerts = st.columns([2, 1])
+
+with col_logs:
+    st.markdown("# Logs")
+    st.dataframe(st.session_state.logs_df)
+with col_alerts:
+    st.markdown("# :red[Alerts]")
+    if not st.session_state.alert_list:
+        st.info("No alerts...")
+    else:
+        for alert in reversed(st.session_state.alert_list):
+            with st.container(border=True):
+                st.caption(f"{alert['TIME']}")
+                st.error(f"Severity: {alert['SEVERITY']}")
+                st.error(f"Alert type: {alert['TYPE']}")
+                with st.expander("More info..."):
+                    st.warning(f"MITTRE: {alert['MITRE ATT&CK']}")
+                    st.warning(f"Description: {alert['Description']}")
+
+
+
+with st.sidebar:
+    st.text_input("Enter hostname/IP: ", key="hname")
+    st.text_input("Enter username: ", key="uname")
+    st.text_input("Enter password: ", type="password", key="passw")
+    if st.button("Connect"):
+        try:
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_client.connect(hostname=st.session_state.hname, port=22, username=st.session_state.uname, password=st.session_state.passw, timeout=5)
+            stdin, stdout, stderr = ssh_client.exec_command(f"sudo -S tail -f /var/log/auth.log", get_pty=True)
+            stdin.write(st.session_state.passw + "\n")
+            stdin.flush()
+            st.session_state.Q = queue.Queue()
+            st.session_state.Q_alert = queue.Queue()
+            t = threading.Thread(target=read_log, args=(stdout, st.session_state.Q, st.session_state.Q_alert), daemon=True)
+            t.start()
+            st.session_state.connected = True
+        except Exception as s:
+            st.exception(s)
+            st.session_state.connected = False
+        if st.session_state.connected:
+            st.success("Connected!")
+        else:
+            st.error("Unable to connect.")
+            
 
          
 
