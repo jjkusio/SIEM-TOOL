@@ -54,7 +54,6 @@ def not_in_sudoers(event):
 def invalid_user(event):
     if event["Event type"] != "invalid_user_attempt":
         return None
-    ip = event["IP"]
     user = event["Username"]
     now = event["Timestamp"]
     return {
@@ -62,7 +61,19 @@ def invalid_user(event):
         "SEVERITY": "HIGH",
         "TYPE": "User does not exist",
         "MITRE ATT&CK": "T1087.001",
-        "Description": f"{user} does not exist"
+        "Description": f"User {user} does not exist"
     }
 
+def failed_sudo(event):
+    if event["Event type"] != "failed_sudo":
+        return None
+    user=event["Username"]
+    now = event["Timestamp"]
+    return{
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "MEDIUM",
+        "TYPE": "Failed sudo command",
+        "MITRE ATT&CK": "T1548.003",
+        "Description": f"{user} failed a sudo command"
+    }
     
