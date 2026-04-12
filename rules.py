@@ -103,3 +103,42 @@ def del_user(event):
         "MITRE ATT&CK": "T1531",
         "Description": f"User ({user}) deleted"
     }
+
+
+def pass_change(event):
+    if event["Event type"] != "password_changed":
+        return None
+    user=event["Username"]
+    now = event["Timestamp"]
+    return{
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "MEDIUM",
+        "TYPE": "Password changed",
+        "MITRE ATT&CK": "T1098",
+        "Description": f"Password changed for user  ({user})"
+    }
+
+def new_group(event):
+    if event["Event type"] != "new_group":
+        return None
+    now = event["Timestamp"]
+    group = event["Group"]
+    return{
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "MEDIUM",
+        "TYPE": "New group",
+        "MITRE ATT&CK": "T1136",
+        "Description": f"Group '{group}' added"
+    }
+
+def accepted_publickey(event):
+    if event["Event type"] != "accepted_publickey" or event["Username"] !="root":
+        return None
+    now = event["Timestamp"]
+    return{
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "High",
+        "TYPE": "Root login",
+        "MITRE ATT&CK": "T1078.003",
+        "Description": f"Successful login for root"
+    }
