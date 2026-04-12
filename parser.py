@@ -1,7 +1,7 @@
 import paramiko
 import re 
 from datetime import datetime
-from rules import brute_force, login_root, not_in_sudoers, invalid_user
+from rules import brute_force, login_root, not_in_sudoers, invalid_user, failed_sudo, new_user, del_user, pass_change, new_group, accepted_publickey
 import streamlit as st
 import pandas as pd
 import threading
@@ -13,6 +13,8 @@ def base_parser(line):
     message = re.search(r"(?<=\):).+\w+", line)
     if message is None:
         message = re.search(r"(?<=\]:).+\w+", line)
+    if message is None:
+        message = re.search(r"(?<=\: ).+\w+", line)
     time = re.search(r"\d{1,2}:\d{1,2}:\d{1,2}", line)
     date = re.search(r"\d{1,4}-\d{1,2}-\d{1,2}", line)
     times= (date.group() if date is not None else "") + " " + (time.group() if time is not None else "")
@@ -92,7 +94,7 @@ def sudo_parser(line):
     dic = base_dic()
     event_type = None
     events=[
-        ("failed su",                     "failed_sudo"),
+        ("incorrect password attempts",                     "failed_sudo"),
         ("not in sudoers",                "user_not_in_sudoers"),
         ("command=",                      "sudo_command"),
         ("session opened",                "session_opened"),
@@ -256,7 +258,7 @@ processes = {
 }
 
 st.set_page_config(layout="wide")
-alerts = [brute_force, login_root, not_in_sudoers, invalid_user]
+alerts = [brute_force, login_root, not_in_sudoers, invalid_user, failed_sudo, new_user, del_user, pass_change, new_group, accepted_publickey]
 
 if "Q"not in st.session_state:
     st.session_state.Q = queue.Queue()
@@ -295,8 +297,7 @@ def read_log(stdout, q_logs, q_alerts):
             if base["Process name"] is None or base["Process name"] not in processes:
                 continue
             # logi
-            if base["Message"] is not None:
-                q_logs.put(base)
+            q_logs.put(base)
             # alerty
             not_base = processes[base["Process name"]](line)
             final = base | not_base
@@ -305,14 +306,15 @@ def read_log(stdout, q_logs, q_alerts):
                 if result:
                     q_alerts.put(result)
         except Exception as e:
+            print(f"ERROR: {e} | LINE: {line}")
             continue
 
 def read_que():
     rows = []
     while True:
         try:
-            alert = st.session_state.Q.get_nowait()
-            rows.append(alert)
+            log= st.session_state.Q.get_nowait()
+            rows.append(log)
         except:
             break
     return rows
@@ -324,36 +326,45 @@ if alert_data:
     for alert in alert_data:
         st.session_state.alert_list.append(alert)
 
-
-
 if rows:
     new_df = pd.DataFrame(rows, columns=["Timestamp", "Message"])
     st.session_state.logs_df = pd.concat(
         [st.session_state.logs_df, new_df], ignore_index=True
     )
 
-col_logs, col_alerts = st.columns([2, 1])
+col_logs, col_alerts, col_events = st.columns([3.4, 2.0, 1.4])
 
 with col_logs:
     st.markdown("# Logs")
-    st.dataframe(st.session_state.logs_df)
+    st.dataframe(st.session_state.logs_df.tail(1000), height=800, column_config={
+        "Timestamp": st.column_config.DatetimeColumn(width="small"),
+        "Message": st.column_config.TextColumn(width="large")
+    })
+
+with col_events:
+    st.markdown("# :blue[Basic events]")
+    with st.container(border=True):
+        st.caption("There will be basic events soon...")
+           
 with col_alerts:
     st.markdown("# :red[Alerts]")
-    if not st.session_state.alert_list:
-        st.info("No alerts...")
-    else:
-        for alert in reversed(st.session_state.alert_list):
-            with st.container(border=True):
-                st.caption(f"{alert['TIME']}")
-                st.error(f"Severity: {alert['SEVERITY']}")
-                st.error(f"Alert type: {alert['TYPE']}")
-                with st.expander("More info..."):
-                    st.warning(f"MITTRE: {alert['MITRE ATT&CK']}")
-                    st.warning(f"Description: {alert['Description']}")
+    with st.container(border=True, height=800):
+        if not st.session_state.alert_list:
+            st.caption("No alerts...")
+        else:
+            for alert in reversed(st.session_state.alert_list):
+                with st.container(border=True, height=420):
+                    st.caption(f"{alert['TIME']}")
+                    st.error(f"Severity: {alert['SEVERITY']}")
+                    st.error(f"Alert type: {alert['TYPE']}")
+                    with st.expander("More info..."):
+                        st.warning(f"MITTRE: {alert['MITRE ATT&CK']}")
+                        st.warning(f"Description: {alert['Description']}")
 
 
 
 with st.sidebar:
+    st.header("Connect by SSH:")
     st.text_input("Enter hostname/IP: ", key="hname")
     st.text_input("Enter username: ", key="uname")
     st.text_input("Enter password: ", type="password", key="passw")
