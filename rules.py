@@ -77,3 +77,29 @@ def failed_sudo(event):
         "Description": f"{user} failed a sudo command"
     }
     
+
+def new_user(event):
+    if event["Event type"] != "new_user":
+        return None
+    user=event["Username"]
+    now = event["Timestamp"]
+    return{
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "MEDIUM",
+        "TYPE": "New user added",
+        "MITRE ATT&CK": "T1136.001",
+        "Description": f"new User ({user}) added"
+    }
+
+def del_user(event):
+    if event["Event type"] != "del_user":
+        return None
+    user=event["Username"]
+    now = event["Timestamp"]
+    return{
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "MEDIUM",
+        "TYPE": "User deleted",
+        "MITRE ATT&CK": "T1531",
+        "Description": f"User ({user}) deleted"
+    }
