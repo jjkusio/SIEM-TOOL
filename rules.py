@@ -4,6 +4,9 @@ from datetime import timedelta
 
 failed = defaultdict(list)
 alert = {}
+failed_ips        = defaultdict(list)  
+cred_stuff        = defaultdict(set)   
+sudo_fails        = defaultdict(list) 
 
 def brute_force(event):
     if event["Event type"] != "failed_password":
@@ -141,4 +144,184 @@ def accepted_publickey(event):
         "TYPE": "Root login",
         "MITRE ATT&CK": "T1078.003",
         "Description": f"Successful login for root"
+    }
+
+def brute_force_success(event):
+    ip  = event.get("IP")
+    now = event.get("Timestamp")
+    if not ip or not now:
+        return None
+
+    if event["Event type"] == "failed_password":
+        failed_ips[ip].append(now)
+        failed_ips[ip] = [t for t in failed_ips[ip]
+                          if now - t < timedelta(minutes=5)]
+
+    if event["Event type"] == "accepted_password":
+        recent = [t for t in failed_ips.get(ip, [])
+                  if now - t < timedelta(minutes=5)]
+        if recent:
+            failed_ips[ip].clear()
+            return {
+                "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+                "SEVERITY":    "Critical",
+                "TYPE":        "Brute force – udany atak",
+                "MITRE ATT&CK": "T1110.001",
+                "Description": f"IP {ip} odgadło hasło użytkownika "
+                               f"{event.get('Username')} po {len(recent)} próbach"
+            }
+
+
+def credential_stuffing(event):
+    if event["Event type"] != "invalid_user_attempt":
+        return None
+    ip   = event.get("IP")
+    user = event.get("Username")
+    now  = event.get("Timestamp")
+    if not ip or not user or not now:
+        return None
+
+    cred_stuff[ip].add(user)
+
+    if len(cred_stuff[ip]) >= 4:
+        count = len(cred_stuff[ip])
+        cred_stuff[ip].clear()
+        return {
+            "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+            "SEVERITY":    "High",
+            "TYPE":        "Credential stuffing",
+            "MITRE ATT&CK": "T1110.004",
+            "Description": f"IP {ip} próbowało {count} różnych nieistniejących loginów"
+        }
+
+
+def ssh_scan(event):
+    if event["Event type"] != "maxstartups_throttle_start":
+        return None
+    now = event.get("Timestamp")
+    return {
+        "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY":    "Medium",
+        "TYPE":        "Skanowanie SSH",
+        "MITRE ATT&CK": "T1046",
+        "Description": "sshd osiągnął MaxStartups – zbyt wiele równoczesnych połączeń"
+    }
+
+
+def repeated_sudo_fail(event):
+    if event["Event type"] != "failed_sudo":
+        return None
+    user = event.get("Username")
+    now  = event.get("Timestamp")
+    if not user or not now:
+        return None
+
+    sudo_fails[user].append(now)
+    sudo_fails[user] = [t for t in sudo_fails[user]
+                        if now - t < timedelta(minutes=10)]
+
+    if len(sudo_fails[user]) >= 3:
+        sudo_fails[user].clear()
+        return {
+            "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+            "SEVERITY":    "High",
+            "TYPE":        "Wielokrotny błąd sudo",
+            "MITRE ATT&CK": "T1548.003",
+            "Description": f"{user} 3+ razy podał błędne hasło przy sudo w ciągu 10 minut"
+        }
+
+
+def del_group(event):
+    if event["Event type"] != "del_group":
+        return None
+    now   = event.get("Timestamp")
+    group = event.get("Group")
+    return {
+        "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY":    "Medium",
+        "TYPE":        "Usunięcie grupy",
+        "MITRE ATT&CK": "T1531",
+        "Description": f"Grupa '{group}' została usunięta"
+    }
+
+
+def user_add_failed(event):
+    if event["Event type"] != "user_add_failed":
+        return None
+    now  = event.get("Timestamp")
+    user = event.get("Username")
+    return {
+        "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY":    "Medium",
+        "TYPE":        "Nieudane dodanie użytkownika",
+        "MITRE ATT&CK": "T1136.001",
+        "Description": f"Nieudana próba dodania użytkownika '{user}'"
+    }
+
+
+def off_hours_login(event):
+    if event["Event type"] not in ("accepted_password", "accepted_publickey"):
+        return None
+    now  = event.get("Timestamp")
+    user = event.get("Username")
+    ip   = event.get("IP")
+    if not now:
+        return None
+
+    hour    = now.hour
+    weekday = now.weekday()  # 0=pon, 6=nie
+    is_work_hours = (weekday < 5) and (8 <= hour < 18)
+
+    if not is_work_hours:
+        return {
+            "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+            "SEVERITY":    "Medium",
+            "TYPE":        "Logowanie poza godzinami",
+            "MITRE ATT&CK": "T1078",
+            "Description": f"Użytkownik {user} zalogował się z {ip} "
+                           f"o {now.strftime('%H:%M')} "
+                           f"({'weekend' if weekday >= 5 else 'poza godz. pracy'})"
+        }
+
+
+def root_session_opened(event):
+    if event["Event type"] != "new_session":
+        return None
+    if event.get("Username") != "root":
+        return None
+    now = event.get("Timestamp")
+    return {
+        "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY":    "High",
+        "TYPE":        "Sesja roota (systemd)",
+        "MITRE ATT&CK": "T1078.003",
+        "Description": "systemd-logind zarejestrował nową sesję dla użytkownika root"
+    }
+
+
+def password_update_failed(event):
+    if event["Event type"] != "update_login_failed":
+        return None
+    now  = event.get("Timestamp")
+    user = event.get("Username")
+    return {
+        "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY":    "Low",
+        "TYPE":        "Błąd aktualizacji keyring",
+        "MITRE ATT&CK": "T1556",
+        "Description": f"Nie udało się zsynchronizować hasła keyringa dla {user}"
+    }
+
+
+def cant_view_passwd(event):
+    if event["Event type"] != "cant_view_or_modify_passwd":
+        return None
+    now  = event.get("Timestamp")
+    user = event.get("Username")
+    return {
+        "TIME":        now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY":    "Medium",
+        "TYPE":        "Próba dostępu do /etc/passwd",
+        "MITRE ATT&CK": "T1087.001",
+        "Description": f"{user} próbował wyświetlić lub zmodyfikować /etc/passwd bez uprawnień"
     }
