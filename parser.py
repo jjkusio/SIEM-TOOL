@@ -264,12 +264,17 @@ if "Q"not in st.session_state:
     st.session_state.Q = queue.Queue()
 if "Q_alert" not in st.session_state:
     st.session_state.Q_alert = queue.Queue()
+if "Q_event" not in st.session_state:
+    st.session_state.Q_event = queue.Queue()
 if "logs_df" not in st.session_state:
     st.session_state.logs_df = pd.DataFrame(
         columns=["Timestamp", "Message"]
     )
 if "alert_list" not in st.session_state:
     st.session_state.alert_list = []
+
+if "event_list" not in st.session_state:
+    st.session_state.event_list = []
 
 if "connected" not in st.session_state:
     st.session_state.connected = False
@@ -289,8 +294,18 @@ def read_alerts_que():
             break
     return alert_list
 
+def read_events_que():
+    event_list=[]
+    while True:
+        try:
+            event = st.session_state.Q_event.get_nowait()
+            event_list.append(event)
+        except queue.Empty:
+            break
+    return event_list
 
-def read_log(stdout, q_logs, q_alerts):
+
+def read_log(stdout, q_logs, q_alerts, q_events):
     for line in iter(stdout.readline, ""):
         try:
             base = base_parser(line)
@@ -301,6 +316,7 @@ def read_log(stdout, q_logs, q_alerts):
             # alerty
             not_base = processes[base["Process name"]](line)
             final = base | not_base
+            q_events.put(final)
             for event in alerts:
                 result = event(final)
                 if result:
@@ -321,6 +337,12 @@ def read_que():
 
 rows = read_que()
 alert_data  = read_alerts_que()
+event_data = read_events_que()
+
+if event_data:
+    for event in event_data:
+        st.session_state.event_list.append(event)
+
 
 if alert_data:
     for alert in alert_data:
@@ -332,7 +354,7 @@ if rows:
         [st.session_state.logs_df, new_df], ignore_index=True
     )
 
-col_logs, col_alerts, col_events = st.columns([3.4, 2.0, 1.4])
+col_logs, col_alerts, col_events = st.columns([2.0, 1.3, 1.8])
 
 with col_logs:
     st.markdown("# Logs")
@@ -344,7 +366,31 @@ with col_logs:
 with col_events:
     st.markdown("# :blue[Basic events]")
     with st.container(border=True):
-        st.caption("There will be basic events soon...")
+        if not st.session_state.event_list:
+            st.caption("No events...")
+        else:
+            df_e = pd.DataFrame(st.session_state.event_list)
+
+            st.metric("Total events", len(df_e))
+            st.metric("Total alerts", len(st.session_state.alert_list))
+
+            st.divider()
+            failed_df = df_e[df_e["Event type"] == "failed_password"]
+            if not failed_df.empty:
+                st.caption( "Top attacking IPs")
+                st.bar_chart(failed_df["IP"].value_counts().head(5))
+            st.divider()
+            st.caption("Event types")
+            st.bar_chart(df_e["Event type"].value_counts().head(8))
+            st.divider()
+            logins = df_e[df_e["Event type"].isin(["accepted_password", "accepted_publickey"])]
+            if not logins.empty:
+                st.caption("Recent logins")
+                st.dataframe(
+                    logins[["Timestamp", "Username", "IP"]].tail(5),
+                    hide_index=True
+                )
+
            
 with col_alerts:
     st.markdown("# :red[Alerts]")
@@ -358,7 +404,7 @@ with col_alerts:
                     st.error(f"Severity: {alert['SEVERITY']}")
                     st.error(f"Alert type: {alert['TYPE']}")
                     with st.expander("More info..."):
-                        st.warning(f"MITTRE: {alert['MITRE ATT&CK']}")
+                        st.warning(f"MITRE: {alert['MITRE ATT&CK']}")
                         st.warning(f"Description: {alert['Description']}")
 
 
@@ -378,7 +424,7 @@ with st.sidebar:
             stdin.flush()
             st.session_state.Q = queue.Queue()
             st.session_state.Q_alert = queue.Queue()
-            t = threading.Thread(target=read_log, args=(stdout, st.session_state.Q, st.session_state.Q_alert), daemon=True)
+            t = threading.Thread(target=read_log, args=(stdout, st.session_state.Q, st.session_state.Q_alert, st.session_state.Q_event), daemon=True)
             t.start()
             st.session_state.connected = True
         except Exception as s:
