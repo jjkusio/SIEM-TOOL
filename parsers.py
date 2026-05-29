@@ -26,7 +26,7 @@ def base_parser(line):
         "Process name": proc_name.group() if proc_name is not None else None,
         "Port": port.group() if port else None,
         "PID": pid.group() if pid is not None else None,
-        "Message": message.group() if message else None
+         "Message": message.group().strip() if message else None
     }
     return dic
 
@@ -236,6 +236,26 @@ def systemd_parser(line):
     dic["Username"] = username.group() if username else None
     return dic
 
+def cron_parser(line):
+    linel = line.lower()
+    dic = base_dic()
+    event_type = None
+    events = [
+        ("cmd", "cron_command"),
+    ]
+    for phrase, event in events:
+        if phrase in linel:
+            event_type = event
+            break
+
+    user = re.search(r"\((\w+)\) CMD", line)       
+    command = re.search(r"CMD \((.+)\)", line)     
+
+    dic["Username"] = user.group(1) if user else None
+    dic["Command"] = command.group(1) if command else None
+    dic["Event type"] = event_type
+    return dic
+
 processes = {
     "sshd": sshd_parser,
     "systemd-logind": systemd_parser,
@@ -246,4 +266,5 @@ processes = {
     "passwd": passwd_parser,
     "sudo": sudo_parser,
     "su": sudo_parser,
+    "CRON": cron_parser
 }

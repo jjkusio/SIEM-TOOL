@@ -98,3 +98,4 @@
 2026-05-28 09:59:20 web01 sshd[3073]: Connection reset by 141.98.11.29 port 45801 [preauth]
 2026-05-28 09:59:50 web01 sshd[3075]: Disconnected from user jan 192.168.1.50 port 53100
 2026-05-28 10:00:00 web01 sshd[3080]: Connection closed by 185.220.101.34 port 46000 [preauth]
+2026-05-29 10:01:01 Ubuntu CRON[4224]: (root) CMD (curl http://127.0.0.1/x.sh | bash)

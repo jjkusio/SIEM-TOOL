@@ -3,10 +3,10 @@ import streamlit as st
 import time
 from parsers import processes, base_parser
 from AbuseIPDB import get_abuse_score
-from rules import brute_force, login_root, not_in_sudoers, invalid_user, failed_sudo, new_user, del_user, pass_change, new_group, accepted_publickey, password_spray, successful_after_bruteforce, off_hours_login, multiple_failed_sudo, privilege_escalation_chain, new_user_sudo, root_publickey_new_ip, username_enumeration, session_flood, external_ip_login
+from rules import brute_force, login_root, not_in_sudoers, invalid_user, failed_sudo, new_user, del_user, pass_change, new_group, accepted_publickey, password_spray, successful_after_bruteforce, off_hours_login, multiple_failed_sudo, privilege_escalation_chain, new_user_sudo, root_publickey_new_ip, username_enumeration, session_flood, external_ip_login, cron_persistence
 
 alerts = [brute_force, login_root, not_in_sudoers, invalid_user, failed_sudo, new_user, del_user, pass_change, new_group, accepted_publickey, password_spray, successful_after_bruteforce, off_hours_login, multiple_failed_sudo,
-          privilege_escalation_chain, new_user_sudo, root_publickey_new_ip, username_enumeration, session_flood, external_ip_login]
+          privilege_escalation_chain, new_user_sudo, root_publickey_new_ip, username_enumeration, session_flood, external_ip_login, cron_persistence]
 
 def read_alerts_que():
     alert_list = []

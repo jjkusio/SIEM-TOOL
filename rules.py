@@ -410,3 +410,22 @@ def external_ip_login(event):
                 "MITRE ATT&CK": "T1078",
                 "Description": f"{user} login from external IP {ip}"
             }
+        
+
+sus_CRON = ["curl", "wget", "bash -i", "/dev/tcp", " nc ", "ncat", "base64", "python -c", "perl -e", "/tmp/", "/dev/shm"]
+
+def cron_persistence(event):
+    if event["Event type"] != "cron_command":
+        return None
+    command = (event.get("Command") or "").lower()
+    if not any(bad in command for bad in sus_CRON):
+        return None
+    now = event["Timestamp"]
+    user = event["Username"]
+    return {
+        "TIME": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "SEVERITY": "HIGH",
+        "TYPE": "Suspicious Cron Job",
+        "MITRE ATT&CK": "T1053.003",
+        "Description": f"Suspicious cron command from ({user}): {event.get('Command')}"
+    }

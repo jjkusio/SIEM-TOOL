@@ -16,7 +16,7 @@ MITRE_TACTICS = {
     "T1548": "Privilege Escalation", "T1548.003": "Privilege Escalation",
     "T1087.001": "Discovery",
     "T1136": "Persistence", "T1136.001": "Persistence", "T1098": "Persistence",
-    "T1531": "Impact",
+    "T1531": "Impact", "T1053.003": "Persistence"
 }
 MITRE_NAMES = {
     "T1110": "Brute Force", "T1110.001": "Password Guessing", "T1110.003": "Password Spraying",
@@ -24,7 +24,7 @@ MITRE_NAMES = {
     "T1548": "Abuse Elevation Control", "T1548.003": "Sudo and Sudo Caching",
     "T1087.001": "Account Discovery: Local Account",
     "T1136": "Create Account", "T1136.001": "Create Account: Local Account",
-    "T1098": "Account Manipulation", "T1531": "Account Access Removal",
+    "T1098": "Account Manipulation", "T1531": "Account Access Removal", "T1053.003": "Scheduled Task/Job: Cron"
 }
 
 st.set_page_config(layout="wide")
@@ -173,15 +173,14 @@ with st.sidebar:
     st.header("Connect by SSH:")
     st.text_input("Enter hostname/IP: ", key="hname")
     st.text_input("Enter username: ", key="uname")
-    st.text_input("Enter password: ", type="password", key="passw")
+    st.text_input("Path to private key:", value="C:/Users/Janek/.ssh/id_ed25519", key="keypath")
     if st.button("Connect"):
         try:
             ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh_client.connect(hostname=st.session_state.hname, port=22, username=st.session_state.uname, password=st.session_state.passw, timeout=5)
-            stdin, stdout, stderr = ssh_client.exec_command(f"sudo -S tail -f /var/log/auth.log", get_pty=True)
-            stdin.write(st.session_state.passw + "\n")
-            stdin.flush()
+            ssh_client.load_system_host_keys()
+            ssh_client.set_missing_host_key_policy(paramiko.RejectPolicy())
+            ssh_client.connect(hostname=st.session_state.hname, port=22, username=st.session_state.uname, key_filename=st.session_state.keypath, timeout=5)
+            stdin, stdout, stderr = ssh_client.exec_command(f"sudo  tail -f /var/log/auth.log /var/log/syslog", get_pty=True)
             st.session_state.Q = queue.Queue()
             st.session_state.Q_alert = queue.Queue()
             t = threading.Thread(target=read_log, args=(stdout, st.session_state.Q, st.session_state.Q_alert, st.session_state.Q_event), daemon=True)
